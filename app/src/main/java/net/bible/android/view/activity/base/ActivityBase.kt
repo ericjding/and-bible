@@ -70,8 +70,7 @@ abstract class ActivityBase : AppCompatActivity(), AndBibleActivity {
     }
 
     fun applyTheme() {
-        ScreenSettings.isNightModeChanged()
-        if (ScreenSettings.isNightMode()) {
+        if (ScreenSettings.isNightMode) {
             setTheme(nightTheme)
         } else {
             setTheme(dayTheme)
@@ -219,7 +218,7 @@ abstract class ActivityBase : AppCompatActivity(), AndBibleActivity {
         CurrentActivityHolder.getInstance().currentActivity = this
 
         //allow action to be called on screen being turned on
-        if (!isScreenOn && ScreenSettings.isScreenOn()) {
+        if (!isScreenOn && ScreenSettings.isScreenOn) {
             onScreenTurnedOn()
         }
     }
@@ -227,7 +226,7 @@ abstract class ActivityBase : AppCompatActivity(), AndBibleActivity {
     override fun onPause() {
         super.onPause()
         Log.i(localClassName, "onPause:" + this)
-        if (isScreenOn && !ScreenSettings.isScreenOn()) {
+        if (isScreenOn && !ScreenSettings.isScreenOn) {
             onScreenTurnedOff()
         }
     }

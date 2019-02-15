@@ -21,6 +21,7 @@ package net.bible.android.view.activity.page.screen
 import android.annotation.SuppressLint
 import android.graphics.Typeface
 import android.os.Build
+import android.text.TextUtils
 
 import androidx.appcompat.view.menu.MenuBuilder
 import androidx.appcompat.view.menu.MenuPopupHelper
@@ -35,10 +36,12 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.TextView
 
 import net.bible.android.BibleApplication
 import net.bible.android.activity.R
 import net.bible.android.control.event.ABEventBus
+import net.bible.android.control.event.passage.CurrentVerseChangedEvent
 import net.bible.android.control.event.window.NumberOfWindowsChangedEvent
 import net.bible.android.control.page.window.Window
 import net.bible.android.control.page.window.Window.WindowOperation
@@ -89,6 +92,7 @@ class DocumentWebViewBuilder @Inject constructor(
     private val WINDOW_BUTTON_TEXT_COLOUR: Int
     private val WINDOW_BUTTON_BACKGROUND_COLOUR: Int
     private val BUTTON_SIZE_PX: Int
+    private val BIBLE_REF_OVERLAY_OFFSET: Int
 
     private var previousParent: LinearLayout? = null
 
@@ -101,6 +105,7 @@ class DocumentWebViewBuilder @Inject constructor(
         WINDOW_BUTTON_BACKGROUND_COLOUR = res.getColor(R.color.window_button_background_colour)
 
         BUTTON_SIZE_PX = res.getDimensionPixelSize(R.dimen.minimise_restore_button_size)
+        BIBLE_REF_OVERLAY_OFFSET = res.getDimensionPixelSize(R.dimen.bible_ref_overlay_offset)
 
         // Be notified of any changes to window config
         ABEventBus.getDefault().register(this)
@@ -124,6 +129,8 @@ class DocumentWebViewBuilder @Inject constructor(
             removeChildViews(parent)
         }
     }
+
+    val isSingleWindow get () = !windowControl.isMultiWindow && windowControl.windowRepository.minimisedScreens.size == 0
 
     @SuppressLint("RtlHardcoded")
     fun addWebView(parent: LinearLayout) {
@@ -193,7 +200,9 @@ class DocumentWebViewBuilder @Inject constructor(
                 }
 
                 // create default action button for top right of each window
-                val defaultWindowActionButton = createDefaultWindowActionButton(window)
+                val defaultWindowActionButton =
+                    if(isSingleWindow) createSingleWindowButton(window)
+                    else createDefaultWindowActionButton(window)
 
                 if(!isSplitHorizontally) {
                     defaultWindowActionButton.translationY = mainBibleActivity.topOffset2
@@ -203,22 +212,40 @@ class DocumentWebViewBuilder @Inject constructor(
                 }
                 else {
                     if(windowNo == 0) {
-                        defaultWindowActionButton.translationY = mainBibleActivity.topOffset2
+                        defaultWindowActionButton.translationY =
+                            if(isSingleWindow) -mainBibleActivity.bottomOffset2
+                            else mainBibleActivity.topOffset2
                     }
                     defaultWindowActionButton.translationX = -mainBibleActivity.rightOffset1
                 }
 
                 windowButtons.add(defaultWindowActionButton)
                 currentWindowFrameLayout.addView(defaultWindowActionButton,
-                        FrameLayout.LayoutParams(BUTTON_SIZE_PX, BUTTON_SIZE_PX, Gravity.TOP or Gravity.RIGHT))
+                        FrameLayout.LayoutParams(BUTTON_SIZE_PX, BUTTON_SIZE_PX,
+                            if(isSingleWindow) Gravity.BOTTOM or Gravity.RIGHT
+                            else Gravity.TOP or Gravity.RIGHT))
                 window.bibleView = bibleView
 
             }
-
+            bibleReferenceOverlay = TextView(mainBibleActivity).apply {
+                if(Build.VERSION.SDK_INT > Build.VERSION_CODES.KITKAT) {
+                    setBackgroundResource(R.drawable.bible_reference_overlay)
+                }
+                visibility = if(buttonsVisible && mainBibleActivity.fullScreen) View.VISIBLE else View.GONE
+                ellipsize = TextUtils.TruncateAt.MIDDLE
+                setLines(1)
+                gravity = Gravity.CENTER
+                translationY = -BIBLE_REF_OVERLAY_OFFSET.toFloat()
+                text = mainBibleActivity.pageTitleText
+            }
+            currentWindowFrameLayout!!.addView(bibleReferenceOverlay,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
             // Display minimised screens
             restoreButtons.clear()
+
             minimisedWindowsFrameContainer = LinearLayout(mainBibleActivity)
-            currentWindowFrameLayout!!.addView(minimisedWindowsFrameContainer,
+            currentWindowFrameLayout.addView(minimisedWindowsFrameContainer,
                     FrameLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, BUTTON_SIZE_PX,
                             Gravity.BOTTOM or Gravity.RIGHT))
             minimisedWindowsFrameContainer.translationY = -mainBibleActivity.bottomOffset2
@@ -243,10 +270,18 @@ class DocumentWebViewBuilder @Inject constructor(
     private val windowButtons: MutableList<Button> = ArrayList()
     private val restoreButtons: MutableList<Button> = ArrayList()
     private lateinit var minimisedWindowsFrameContainer: LinearLayout
+    private lateinit var bibleReferenceOverlay: TextView
 
     fun onEvent(event: MainBibleActivity.FullScreenEvent) {
         toggleWindowButtonVisibility(true, force=true)
         resetTouchTimer()
+    }
+
+    fun onEvent(event: CurrentVerseChangedEvent) {
+        mainBibleActivity.runOnUiThread {
+            bibleReferenceOverlay.setText(mainBibleActivity.pageTitleText)
+        }
+
     }
 
     fun onEvent(event: MainBibleActivity.ConfigurationChanged) {
@@ -269,24 +304,36 @@ class DocumentWebViewBuilder @Inject constructor(
     private fun resetTouchTimer() {
         toggleWindowButtonVisibility(true)
         timerTask?.cancel()
-        timerTask = object : TimerTask() {
-            override fun run() {
-                toggleWindowButtonVisibility(false)
+
+        if(true || mainBibleActivity.fullScreen) {
+            timerTask = object : TimerTask() {
+                override fun run() {
+                    toggleWindowButtonVisibility(false)
+                }
             }
+            sleepTimer.schedule(timerTask, 2000L)
         }
-        sleepTimer.schedule(timerTask, 3000L)
     }
 
     private var buttonsVisible = true
     private fun toggleWindowButtonVisibility(show: Boolean, force: Boolean = false) {
+        if(!::minimisedWindowsFrameContainer.isInitialized) {
+            // Too early to do anything
+            return
+        }
         if(buttonsVisible == show && !force) {
             return
         }
         mainBibleActivity.runOnUiThread {
             for ((idx, b) in windowButtons.withIndex()) {
                 if(mainBibleActivity.isSplitHorizontally) {
-                    b.animate().translationY(if(idx == 0) mainBibleActivity.topOffset2 else 0.0F)
-                            .setInterpolator(DecelerateInterpolator()).start()
+                    b.animate().translationY(
+                        if(idx == 0) {
+                            if(isSingleWindow) -mainBibleActivity.bottomOffset2
+                            else mainBibleActivity.topOffset2}
+                        else 0.0F
+                    )
+                        .setInterpolator(DecelerateInterpolator()).start()
 
                     if(show) {
                         b.visibility = View.VISIBLE
@@ -305,23 +352,28 @@ class DocumentWebViewBuilder @Inject constructor(
                             .setInterpolator(DecelerateInterpolator()).start()
                     if(show) {
                         b.visibility = View.VISIBLE
-                        b.animate().translationY(mainBibleActivity.topOffset2)
-                                .setInterpolator(DecelerateInterpolator())
-                                .start()
+                        b.animate().translationY(
+                            if(isSingleWindow) -mainBibleActivity.bottomOffset2
+                            else mainBibleActivity.topOffset2
+                        )
+                            .setInterpolator(DecelerateInterpolator())
+                            .start()
                     }  else {
                         b.animate().translationY(-b.height.toFloat())
-                                .setInterpolator(AccelerateInterpolator())
-                                .withEndAction { b.visibility = View.GONE }
-                                .start()
+                            .setInterpolator(AccelerateInterpolator())
+                            .withEndAction { b.visibility = View.GONE }
+                            .start()
                     }
                 }
             }
             updateMinimizedButtons(show)
+            updateBibleReferenceOverlay(show)
         }
         buttonsVisible = show
     }
 
-    fun updateMinimizedButtons(show: Boolean) {
+    private fun updateMinimizedButtons(show: Boolean) {
+        if(!mainBibleActivity.fullScreen) return
         if(show) {
             minimisedWindowsFrameContainer.visibility = View.VISIBLE
             minimisedWindowsFrameContainer.animate().translationY(-mainBibleActivity.bottomOffset2)
@@ -332,6 +384,21 @@ class DocumentWebViewBuilder @Inject constructor(
                     .setInterpolator(AccelerateInterpolator())
                     .withEndAction { minimisedWindowsFrameContainer.visibility = View.GONE }
                     .start()
+        }
+    }
+
+    private fun updateBibleReferenceOverlay(show: Boolean) {
+        val show = mainBibleActivity.fullScreen && show
+        if(show) {
+            bibleReferenceOverlay.visibility = View.VISIBLE
+            bibleReferenceOverlay.animate().alpha(1.0f)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        }  else {
+            bibleReferenceOverlay.animate().alpha(0f)
+                .setInterpolator(AccelerateInterpolator())
+                .withEndAction { bibleReferenceOverlay.visibility = View.GONE }
+                .start()
         }
     }
 
@@ -429,10 +496,17 @@ class DocumentWebViewBuilder @Inject constructor(
         return bibleViewFactory.createBibleView(window)
     }
 
+    private fun createSingleWindowButton(window: Window): Button {
+        return createTextButton("⊕",
+            { v -> windowControl.addNewWindow()},
+            { v -> false}
+        )
+    }
+
     private fun createCloseButton(window: Window): Button {
         return createTextButton("X",
-                { v -> showPopupWindow(window, v) },
-                { v -> windowControl.closeWindow(window); true}
+            { v -> windowControl.closeWindow(window)},
+            { v -> showPopupWindow(window, v); true}
         )
     }
 

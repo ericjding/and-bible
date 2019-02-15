@@ -93,9 +93,6 @@ class BibleView(val mainBibleActivity: MainBibleActivity,
 
     private var maintainMovingChapterVerse = ChapterVerse.NOT_SET
 
-    // remember current background colour so we know when it changes
-    private var wasNightMode: Boolean? = null
-
     private var gestureDetector: GestureDetectorCompat
 
     /** Used to prevent scroll off bottom using auto-scroll
@@ -110,7 +107,7 @@ class BibleView(val mainBibleActivity: MainBibleActivity,
 
     private val gestureListener  = BibleGestureListener(mainBibleActivity)
 
-    class BibleViewTouched
+    class BibleViewTouched(val onlyTouch: Boolean = false)
 
     init {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
@@ -120,7 +117,6 @@ class BibleView(val mainBibleActivity: MainBibleActivity,
         }
         gestureDetector = GestureDetectorCompat(context, gestureListener)
         setOnTouchListener { v, event ->
-            ABEventBus.getDefault().post(BibleViewTouched())
             if (gestureDetector.onTouchEvent(event)) {
                 true
             } else v.performClick()
@@ -189,44 +185,29 @@ class BibleView(val mainBibleActivity: MainBibleActivity,
         onEvent(CurrentWindowChangedEvent(windowControl.activeWindow))
     }
 
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-        // update the height in ScreenSettings. Global screen height must be taken from parent view
-        // that contains all windows.
-        if (parent != null && parent.parent != null) {
-            ScreenSettings.setContentViewHeightPx((parent.parent as View).measuredHeight)
-        }
-    }
-
     /** apply settings set by the user using Preferences
      */
     override fun applyPreferenceSettings() {
         applyFontSize()
 
         changeBackgroundColour()
-
-        ScreenSettings.setContentViewHeightPx(height)
     }
 
     private fun applyFontSize() {
         val fontSize = pageControl.getDocumentFontSize(windowNo)
         settings.defaultFontSize = fontSize
-
-        // 1.6 is taken from css - line-height: 1.6em;
-        ScreenSettings.setLineHeightDips((1.6 * fontSize).toInt())
     }
 
     /** may need updating depending on environmental brightness
      */
-    override fun changeBackgroundColour(): Boolean {
+    override fun changeBackgroundColour() {
         // if night mode then set dark background colour
-        val nightMode = ScreenSettings.isNightMode()
-        val changed = nightMode != this.wasNightMode
-        if (changed) {
-            UiUtils.setBibleViewBackgroundColour(this, nightMode)
-            this.wasNightMode = nightMode
+
+        if(mainBibleActivity.ready) {
+            UiUtils.applyTheme(mainBibleActivity)
         }
-        return changed
+
+        UiUtils.setBibleViewBackgroundColour(this, ScreenSettings.isNightMode)
     }
 
     override fun show(origHtml: String, chapterVerse: ChapterVerse, jumpToYOffsetRatio: Float) {
@@ -238,17 +219,17 @@ class BibleView(val mainBibleActivity: MainBibleActivity,
         // call this from here because some documents may require an adjusted font size e.g. those using Greek font
         applyFontSize()
 
-        var delta = 0.0F
+        val startPaddingHeight = mainBibleActivity.topOffsetWithActionBar / mainBibleActivity.resources.displayMetrics.density
+        html = html.replace("<div id='start'>", "<div id='start' style='height:${startPaddingHeight}px'>")
 
-        if(!SharedActivityState.getInstance().isFullScreen
-                && (!mainBibleActivity.isSplitHorizontally || windowControl.windowRepository.firstWindow == windowNo))
-        {
-            delta = mainBibleActivity.topOffset2 / mainBibleActivity.resources.displayMetrics.density
-            html = html.replace("<div id='start'>", "<div id='start' style='height:${delta}px'>")
-        }
+        val offset = if(!SharedActivityState.getInstance().isFullScreen
+            && (!mainBibleActivity.isSplitHorizontally || windowControl.windowRepository.firstWindow == windowNo)
+        ) {
+            mainBibleActivity.topOffset2 / mainBibleActivity.resources.displayMetrics.density
+        }  else 0.0F
 
         // If verse 1 then later code will jump to top of screen because it looks better than going to verse 1
-        html = html.replace("</body>", "<script>$(document).ready(function() {scrollToVerse('${getIdToJumpTo(chapterVerse)}', true, $delta);})</script></body>")
+        html = html.replace("</body>", "<script>$(document).ready(function() {scrollToVerse('${getIdToJumpTo(chapterVerse)}', true, $offset);})</script></body>")
         mJumpToYOffsetRatio = jumpToYOffsetRatio
 
         // either enable verse selection or the default text selection

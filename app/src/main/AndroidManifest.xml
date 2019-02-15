@@ -3,8 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="net.bible.android.activity"
     android:installLocation="auto"
-    android:versionCode="286"
-    android:versionName="3.0.286">
+    android:versionCode="296"
+    android:versionName="3.1.296-rc">
 
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
@@ -40,8 +40,6 @@
         <uses-library
             android:name="org.apache.http.legacy"
             android:required="false" />
-
-        <!-- deprecated but necessary to prevent old shortcut breaking -->
         <activity
             android:name=".StartupActivity"
             android:configChanges="keyboardHidden|orientation|screenSize|locale"
@@ -56,6 +54,7 @@
         <activity
             android:name="net.bible.android.view.activity.page.MainBibleActivity"
             android:configChanges="keyboardHidden|orientation|screenSize|locale"
+            android:windowSoftInputMode="stateHidden|adjustResize"
             android:launchMode="singleTask"
             android:label="@string/app_name" />
         <activity
